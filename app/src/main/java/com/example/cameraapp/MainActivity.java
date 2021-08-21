@@ -7,6 +7,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
+import androidx.core.app.ActivityCompat;
 import androidx.core.app.ShareCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -21,6 +22,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -92,7 +94,7 @@ public class MainActivity extends BaseActivity implements OnPhotoEditorListener,
         View.OnClickListener,
         PropertiesBSFragment.Properties,
         ShapeBSFragment.Properties
-       , EditingToolsAdapter.OnItemSelected {
+        , EditingToolsAdapter.OnItemSelected {
     private String image_path = "";
     private static final String TAG = MainActivity.class.getSimpleName();
     public static final String FILE_PROVIDER_AUTHORITY = "com.burhanrashid52.photoeditor.fileprovider";
@@ -108,7 +110,7 @@ public class MainActivity extends BaseActivity implements OnPhotoEditorListener,
     private ShapeBuilder mShapeBuilder;
     private TextView mTxtCurrentTool;
     Uri imageUri;
-    private RecyclerView mRvTools ;
+    private RecyclerView mRvTools;
     private final EditingToolsAdapter mEditingToolsAdapter = new EditingToolsAdapter(this);
 
 
@@ -142,7 +144,6 @@ public class MainActivity extends BaseActivity implements OnPhotoEditorListener,
 
         boolean pinchTextScalable = getIntent().getBooleanExtra(PINCH_TEXT_SCALABLE_INTENT_KEY, true);
 
-      
 
         mPhotoEditor = new PhotoEditor.Builder(this, mPhotoEditorView)
                 .setPinchTextScalable(pinchTextScalable) // set flag to make text scalable when pinch
@@ -160,7 +161,7 @@ public class MainActivity extends BaseActivity implements OnPhotoEditorListener,
     private void handleIntentImage(ImageView source) {
         Intent intent = getIntent();
         if (intent != null) {
-           
+
             if (Intent.ACTION_EDIT.equals(intent.getAction()) ||
                     ACTION_NEXTGEN_EDIT.equals(intent.getAction())) {
                 try {
@@ -278,9 +279,8 @@ public class MainActivity extends BaseActivity implements OnPhotoEditorListener,
                 Dexter.withActivity(MainActivity.this).withPermissions(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE).withListener(new MultiplePermissionsListener() {
                     @Override
                     public void onPermissionsChecked(MultiplePermissionsReport report) {
-                        Intent intent = new Intent();
+                        Intent intent = new Intent(Intent.ACTION_PICK);
                         intent.setType("image/*");
-                        intent.setAction(Intent.ACTION_GET_CONTENT);
                         startActivityForResult(Intent.createChooser(intent, "Select Picture"), PICK_REQUEST);
                     }
 
@@ -322,44 +322,71 @@ public class MainActivity extends BaseActivity implements OnPhotoEditorListener,
     }
 
     private void saveImage() {
-        final String fileName = String.valueOf(System.currentTimeMillis());
+        final String fileName = System.currentTimeMillis() + "image";
         final boolean hasStoragePermission =
                 ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PERMISSION_GRANTED;
-        if (hasStoragePermission || isSdkHigherThan28()) {
-            showLoading("Saving...");
-            mSaveFileHelper.createFile(fileName, (fileCreated, filePath, error, uri) -> {
-                if (fileCreated) {
-                    SaveSettings saveSettings = new SaveSettings.Builder()
-                            .setClearViewsEnabled(true)
-                            .setTransparencyEnabled(true)
-                            .build();
+        Dexter.withActivity(MainActivity.this).withPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE).withListener(new PermissionListener() {
+            @Override
+            public void onPermissionGranted(PermissionGrantedResponse response) {
 
-                    mPhotoEditor.saveAsFile(filePath, saveSettings, new PhotoEditor.OnSaveListener() {
-                        @Override
-                        public void onSuccess(@NonNull String imagePath) {
-                            image_path = imagePath;
-                            mSaveFileHelper.notifyThatFileIsNowPubliclyAvailable(getContentResolver());
-                            hideLoading();
-                            showSnackbar("Image Saved Successfully");
-                            mSaveImageUri = uri;
-                            mPhotoEditorView.getSource().setImageURI(mSaveImageUri);
-                        }
+                if (hasStoragePermission || isSdkHigherThan28()) {
+                    showLoading("Saving...");
+                    mSaveFileHelper.createFile(fileName, (fileCreated, filePath, error, uri) -> {
+                        if (fileCreated) {
+                            SaveSettings saveSettings = new SaveSettings.Builder()
+                                    .setClearViewsEnabled(true)
+                                    .setTransparencyEnabled(true)
+                                    .build();
+                            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                                // TODO: Consider calling
+                                //    ActivityCompat#requestPermissions
+                                // here to request the missing permissions, and then overriding
+                                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                //                                          int[] grantResults)
+                                // to handle the case where the user grants the permission. See the documentation
+                                // for ActivityCompat#requestPermissions for more details.
+                                return;
+                            }
+                            mPhotoEditor.saveAsFile(filePath, saveSettings, new PhotoEditor.OnSaveListener() {
+                                @Override
+                                public void onSuccess(@NonNull String imagePath) {
+                                    image_path = imagePath;
+                                    mSaveFileHelper.notifyThatFileIsNowPubliclyAvailable(getContentResolver());
+                                    hideLoading();
+                                    showSnackbar("Image Saved Successfully");
+                                    mSaveImageUri = uri;
+                                    mPhotoEditorView.getSource().setImageURI(mSaveImageUri);
+                                }
 
-                        @Override
-                        public void onFailure(@NonNull Exception exception) {
-                            hideLoading();
-                            showSnackbar("Failed to save Image");
-                        }
-                    });
+                                @Override
+                                public void onFailure(@NonNull Exception exception) {
+                                    hideLoading();
+                                    showSnackbar("Failed to save Image");
+                                }
+                            });
 
-                } else {
-                    hideLoading();
-                    showSnackbar(error);
-                }
-            });
-        } else {
-            requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        }
+                      } else {
+                          hideLoading();
+                          Log.d("error_while_saving", "saveImage: "+error);
+                          showSnackbar(error);
+                      }
+                  });
+              } else {
+                  requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+              }
+          }
+
+          @Override
+          public void onPermissionDenied(PermissionDeniedResponse response) {
+
+          }
+
+          @Override
+          public void onPermissionRationaleShouldBeShown(PermissionRequest permission, PermissionToken token) {
+
+          }
+      }).check();
+
     }
 
     @Override
